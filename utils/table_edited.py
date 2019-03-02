@@ -40,6 +40,7 @@ class Table(table.Table):
 
     # Set attributes
     main_col = None  # Default column used to order
+    log = []  # Save output when using insert_value method
 
     # New methods
     def rename_columns(self, old, new):
@@ -118,11 +119,17 @@ class Table(table.Table):
         for col in self.colnames:
             if debug:
                 print(col, self[col].unit)
+
+            # Search for bad units
             for bunit, gunit in zip(badunits, gunits):
                 if self[col].unit == bunit:
                     self[col].unit = gunit
+                    
+                    # Message and log it
+                    self.log.append(
+                        text_frame.format(col, self[col].unit, bunit))
                     if verbose:
-                        print(text_frame.format(col, self[col].unit, bunit))
+                        print(self.log[-1])
 
     def cols_2_qarr(self, *keys):
         '''
@@ -269,13 +276,17 @@ class Table(table.Table):
         
         col_units = self[colname].unit
         try:  # Check if col_units valid
-            1.* Unit(col_units)
+            1. * Unit(col_units)
         except TypeError:
             print('Column has no units (unit = None)')
         except:  # Enter valid unit and refresh all table
-            gunit = input("Column units '{}' are not".format(col_units) +
-                          ' recognized by astropy.\n' +
-                         'Please enter a corresponding astropy unit.')
+            print("Column units '{}' are not".format(col_units) +
+                          ' recognized by astropy.\n')
+            print("Error message from astropy:")
+            print_unit_error(str(col_units))
+            print("-------------------------")
+            gunit = input('***** Please enter the corresponding unit'
+                          + ' recognized by astropy unit: ')
             self.correct_units(badunits=[str(col_units)], gunits=[gunit])
         
     def insert_value(self, pl_name, colname, value, reference, err=None, units=None, name_key=None,
@@ -323,7 +334,8 @@ class Table(table.Table):
         --------
         Example with bad error column name, units converted from rad to deg,
         specified name_key::
-            >>> data = Table.read('/home/adb/Archive/masterfile.ecsv')
+            >>> from transit_prediction.masterfile import MasterFile
+            >>> data = MasterFile.read()
             >>> data.insert_value('HD 189733', 'ra', 4, 'Very-bad-reference et al.',
                                   err=0.1, units='rad', name_key='hd_name')
         Ouput::
@@ -340,6 +352,7 @@ class Table(table.Table):
 
         index = self.get_index(pl_name, name_key=name_key)[0]
         pl_name = self['pl_name'][index]
+        log = []
 
         # Enter reference
 
@@ -352,8 +365,10 @@ class Table(table.Table):
                                          name=ref_col,
                                          dtype=ref_format))
         finally:
+            log.append(
+                'Setting column {} to {}'.format(ref_col, reference))
             if verbose:
-                print('Setting column {} to {}'.format(ref_col, reference))
+                print(log[-1])
             self[ref_col][index] = reference
 
         # Check units and convert if needed
@@ -374,16 +389,24 @@ class Table(table.Table):
             value = (value * Unit(units)).to(col_units)
             if err: err = (err * Unit(units)).to(col_units)
         elif units and not col_units:
-            raise UnitTypeError('Column has no units... see column description and leave units=None')
+            raise UnitTypeError('Column has no units...' 
+                                + 'see column description and leave units=None')
 
         # Enter new value
-
-        print('Planet = {}, column = {}'.format(pl_name, colname))
-        print('Setting value to {}'.format(value))
+        
+        log.append(
+            'Planet = {}, column = {} \n'.format(pl_name, colname)
+            + 'Setting value to {}'.format(value)
+        )
+        print(log[-1])
         try:
             self[colname][index] = value.value
         except AttributeError:
             self[colname][index] = value
+            
+        # Save log
+        self.log.extend(log)
+        log = []
 
         # Enter err value
         if err is not None:
@@ -393,9 +416,13 @@ class Table(table.Table):
                 err_m, err_p = err
             except TypeError:
                 err_m, err_p = err, err
+
+            log.append(
+                'Setting column [{},{}] to [{},{}]'\
+                .format(err_m_col, err_p_col,err_m, err_p)
+            )
             if verbose:
-                print('Setting column [{},{}] to [{},{}]'.format(err_m_col, err_p_col,
-                                                                 err_m, err_p))
+                print(log[-1])
             try:
                 try:
                     self[err_m_col][index] = err_m.value
@@ -403,6 +430,8 @@ class Table(table.Table):
                 except AttributeError:
                     self[err_m_col][index] = err_m
                     self[err_p_col][index] = err_p
+                # Save log
+                self.log.extend(log)
             except KeyError:
                 print('Last operation aborted, see WARNING')
                 warnings.warn('Wrong error column name. Did not write error value(s).\n'+
@@ -457,12 +486,15 @@ class Table(table.Table):
         elif units and col_units:
             err = (err * Unit(units)).to(col_units)
         elif units and not col_units:
-            raise UnitTypeError('Column has no units... see column description and leave units=None')
+            raise UnitTypeError('Column has no units... see column description or leave units=None')
 
         # Enter new value
 
-        print('Planet = {}, column = {}'.format(pl_name, colname))
-        print('Setting value to {}'.format(err))
+        self.log.append(
+            'Planet = {}, column = {}\n'.format(pl_name, colname)
+            + 'Setting value to {}'.format(err)
+        )
+        print(self.log[-1])
         try:
             self[colname][index] = err.value
         except AttributeError:
@@ -481,6 +513,13 @@ def intersection(self, other):
         return list(set(self).intersection(other))
     else:
         return NotImplemented
+    
+def print_unit_error(str_unit):
+    
+    try:
+        Unit(str_unit)
+    except ValueError as e:
+        print(e)
 
                     
                  

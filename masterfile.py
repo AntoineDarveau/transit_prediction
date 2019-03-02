@@ -1,4 +1,6 @@
 from transit_prediction.utils.table_edited import Table
+from getpass import getuser
+import datetime
 
 class MasterFile(Table):
     
@@ -6,6 +8,7 @@ class MasterFile(Table):
     file = "masterfile.ecsv"
     vfile = "masterfile.html"
     main_col = 'pl_name'
+    _logfile = 'log_masterfile.txt'
     
     @classmethod
     def read(cls):
@@ -13,8 +16,22 @@ class MasterFile(Table):
     
     def save_update(self):
         
+        self._update_log()
         self.write(self.path + self.file, overwrite=True)
+        
+    def save_to_html(self):
+        
         self.write(self.path + self.vfile, format='jsviewer')
+        
+    def _update_log(self):
+        
+        with open(self.path+self._logfile, 'a+') as f:
+
+            f.write('----------------------\n')
+            f.write(str(datetime.datetime.now())+'\n')
+            f.write('MODIFICATION BY {} :\n'.format(getuser()))
+            f.writelines('\n'.join(self.log)+'\n')
+            f.close()
     
 #     def __init__(self, target_list=None, verbose=True):
         
