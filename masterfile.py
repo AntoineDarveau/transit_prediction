@@ -8,7 +8,7 @@ class MasterFile(Table):
     file = "masterfile.ecsv"
     vfile = "masterfile.html"
     main_col = 'pl_name'
-    _logfile = 'log_masterfile.txt'
+    _logfile = 'log_masterfile_temp.txt'
     
     @classmethod
     def read(cls):
