@@ -308,8 +308,8 @@ class Table(table.Table):
             Value to be inserted
         reference : str
             Reference name for the value. (Ex: 'Darveau-Bernier et al.')
-        err : `None`, scalar or list of 2 values (minus/plus)
-            Error for ``value``. If list, [err_minus, err_plus].
+        err : `None`, scalar or list of 2 values (plus/minus)
+            Error for ``value``. If list, [err_plus, err_minus].
             If scalar, same error for both. Default is None. The name of 
             the error columns is given by ``colname``+``err_ext``+(1 or 2).
             If it doesn't match the actual err column name, it raises a
@@ -499,6 +499,13 @@ class Table(table.Table):
             self[colname][index] = err.value
         except AttributeError:
             self[colname][index] = err
+            
+    def add_column_beside(self, col, name_where, *args, where=1, **kwargs):
+        
+        index = self.index_column(name_where)
+        index += where
+        
+        self.add_column(col, *args, index=index, **kwargs)
 
 
 def difference(left, right):

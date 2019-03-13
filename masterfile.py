@@ -32,6 +32,7 @@ class MasterFile(Table):
             f.write('MODIFICATION BY {} :\n'.format(getuser()))
             f.writelines('\n'.join(self.log)+'\n')
             f.close()
+        self.log = []  # Erase log
     
 #     def __init__(self, target_list=None, verbose=True):
         
