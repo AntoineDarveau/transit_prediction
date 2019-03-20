@@ -12,13 +12,20 @@ class MasterFile(Table):
     
     @classmethod
     def read(cls):
-        return super().read(cls.path + cls.file)
+        out = super().read(cls.path + cls.file)
+        cls.save_dim = (len(out), len(out.keys()))
+        return out
     
     def save_update(self):
-        
-        self._update_log()
-        self.write(self.path + self.file, overwrite=True)
-        
+        new_dim = len(self), len(self.keys())
+        if (self.save_dim[0]<new_dim[1] 
+         and self.save_dim[1]<new_dim[1]):
+            self._update_log()
+            self.write(self.path + self.file, overwrite=True)
+        else:
+            raise ValueError("dimensions don't match \n"
+                            +"masterfile dim: {} \n".format(self.save_dim)
+                            +"table dim: {}".format(new_dim))
     def save_to_html(self):
         
         self.write(self.path + self.vfile, format='jsviewer')
