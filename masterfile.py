@@ -18,8 +18,8 @@ class MasterFile(Table):
     
     def save_update(self):
         new_dim = len(self), len(self.keys())
-        if (self.save_dim[0]<new_dim[1] 
-         and self.save_dim[1]<new_dim[1]):
+        if (self.save_dim[0]<=new_dim[0] 
+         and self.save_dim[1]<=new_dim[1]):
             self._update_log()
             self.write(self.path + self.file, overwrite=True)
         else:

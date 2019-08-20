@@ -108,8 +108,8 @@ class Table(table.Table):
         self.add_column(self[colname_temp], name=colname, index=0)
         self.remove_column(colname_temp)
     
-    def correct_units(self, badunits=['degrees', 'days', 'hours'],
-                     gunits=['degree', 'day', 'hour'], verbose=True,
+    def correct_units(self, badunits=['degrees', 'days', 'hours','jovMass'],
+                     gunits=['degree', 'day', 'hour','jupiterMass'], verbose=True,
                      debug=False):
         '''
         Correct columns units for astropy units
@@ -168,7 +168,8 @@ class Table(table.Table):
         self[col][position] = value
 
     def complete(self, right, key=None, join_type='left',
-                 add_col=True, metadata_conflicts='warn', **kwargs):
+                 add_col=True, metadata_conflicts='warn', 
+                 verbose=True, debug=False, **kwargs):
         """
         Add every missing data in self if present in right.
 
@@ -185,7 +186,8 @@ class Table(table.Table):
 
         # If not masked, simple join() will do
         if self.masked:
-            out = self._complete(right, key=key, join_type=join_type, add_col=add_col)
+            out = self._complete(right, key=key, join_type=join_type,
+                                 add_col=add_col, verbose=verbose, debug=debug)
         else:
             col_name_map = OrderedDict()
             out = _join(self, right, join_type, col_name_map, keys=key, **kwargs)
@@ -196,7 +198,8 @@ class Table(table.Table):
 
         return out
 
-    def _complete(self, right, key=None, join_type='left', add_col=True):
+    def _complete(self, right, key=None, join_type='left', add_col=True,
+                  verbose=True, debug=False):
 
         if not key:
             raise ValueError('key is empty')
@@ -228,9 +231,13 @@ class Table(table.Table):
             del join_t[col2]
 
         # Remove added columns from "right" if not wanted
-        if not add_col:
-            print('remove non shared columns from second table')
-            join_t.remove_columns(difference(self, right))
+        supp_cols = difference(right.keys(), self.keys())
+        if debug: print(supp_cols)
+
+        if not add_col and supp_cols:
+            if verbose:
+                print('remove non shared columns from second table')
+            join_t.remove_columns(supp_cols)
 
         return join_t
 
