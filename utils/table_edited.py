@@ -61,7 +61,7 @@ class Table(table.Table):
                             "\n \t Set its mask to True before calling" +
                             " (example: t = Table(t,masked=True)).")
 
-    def by_plName(self, *plName, name_key=None, remove=False):
+    def by_pl_name(self, *plName, name_key=None, remove=False):
         """
         Return the complete line of a given planet name (plName)
         """
@@ -74,6 +74,13 @@ class Table(table.Table):
             self.remove_row(int(position[0]))
 
         return out
+    
+    def by_plName(self, *args, **kwargs):
+        """
+        Old name of by_pl_name. Just an alias
+        """
+        
+        return self.by_pl_name(*args, **kwargs)
     
     def get_index(self, *plName, name_key=None):
         '''
