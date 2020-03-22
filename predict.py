@@ -107,6 +107,27 @@ class Prediction():
                                  name=info['pl_name'])
             
         return target
+    
+    def add_column(self, value, key, description, unit=None, message=None):
+
+        info = self.info
+        
+        if message is None:
+            message = "'{}' not available for all systems."  \
+                    + " Please specify a value as input."
+            message.format(key)
+        
+        if value is not None:
+            try:
+                info[key] = Column(value,
+                                   unit=value.unit,
+                                   description=description)
+            except AttributeError:
+                info[key] = Column(value,
+                                   unit=unit,
+                                   description=description)
+        elif info[key].mask.any():
+            raise ValueError(message)
 
     def __repr__(self):
         '''
@@ -289,4 +310,197 @@ class PredictPhase(Prediction):
         else:
             warn('No event found at all', AstropyUserWarning)
             
+        return full_table
+    
+class PredictTransit(Prediction):
+    
+    def __init__(self, *args, t0=None, duration=None, **kwargs):
+    
+        super().__init__(*args, **kwargs)
+        info = self.info
+        
+        # Add mid transit time column
+        key, description = 'pl_tranmid', 'mid-transit time'
+        self.add_column(t0, key, description, unit=u.d)
+        
+        # Add transit duration column
+        key, description = 'pl_trandur', 'transit duration'
+        self.add_column(duration, key, description, unit=u.h)
+        
+#         if t0 is not None:
+#             try:
+#                 info[key] = Column(t0,
+#                                    unit=t0.unit,
+#                                    description = description)
+#             except AttributeError:
+#                 info[key] = Column(t0,
+#                                    unit=u.d,
+#                                    description = description)
+#         elif info[key].mask.any():
+#             raise ValueError(
+#                 "'pl_tranmid' not available for all systems." +
+#                 " Please specify a value for input 't0'.")
+                
+        # Save other attributes
+        info_cols = ['pl_name', 'pl_tranmid'] + self.supp_cols
+        self.info_cols = list(set(info_cols))  # Make sure cols are unique
+        
+
+    def predict(self):
+        
+#         # Make sure baseline has units
+#         if baseline is not None:
+#             try:
+#                 baseline.unit
+#             except AttributeError:
+#                 warn("No units specified for input 'baseline'."
+#                      +" Assuming hours.")
+#                 baseline = baseline * u.h
+            
+        
+        # Inputs from object's attributes
+        t1, t2 = self.meta['Time_limits']
+        info = self.info
+        n_eclipses = self.n_eclipses
+        constraints_list = self.constraints
+        obs = self.obs
+        supp_cols = self.supp_cols
+            
+        # Define needed quantities based on planets infos
+        # Must be quatities arrays (astropy)
+        # Here we use a given astropy Table (info) to get the infos
+
+        epoch, period, transit_duration =   \
+            [info[k_col].quantity for k_col 
+             in ('pl_tranmid', 'pl_orbper', 'pl_trandur')]
+        epoch = Time(epoch, format='jd')
+        pl_name = info['pl_name']
+        
+        observing_time = t1
+        
+        
+        # Init output table
+        col_names = ('pl_name',
+                     'mid_tr',
+                     'AM_mid_tr',
+                     'tr_start',
+                     'tr_end',
+                     'AM_tr_start',
+                     'AM_tr_end',
+                     'start',
+                     'end',
+                     'AM_start',
+                     'AM_end',
+                     'Obs_start',
+                     'Baseline_before',
+                     'Obs_end',
+                     'Baseline_after',
+                     'moon',
+                     *supp_cols
+                    )
+        meta = {
+                **self.meta
+               }
+        full_table = Table()
+        
+        # Iterations on the targets
+        for itar, target in enumerate(self.targets):
+
+            # -------------------------
+            # Steps to predict transits
+            # -------------------------
+            
+            # Define system
+            sys = EclipsingSystem(primary_eclipse_time=epoch[itar],
+                                  orbital_period=period[itar],
+                                  duration=transit_duration[itar],
+                                  name=target.name
+                                 )
+            
+            # Find all events ...
+            while True:
+                t_mid = sys.next_primary_eclipse_time(observing_time, n_eclipses=n_eclipses)
+                # ... until t2 is passed
+                if t_mid[-1] > t2: break
+                # or add eclipses to pass t2
+                else: n_eclipse += 500
+
+            # Remove events after time window
+            t_mid = t_mid[t_mid < t2]
+            
+            # Number of events
+            n_event, = t_mid.shape
+            
+            # Get ingress and egress times
+            t1_t4 = sys.next_primary_ingress_egress_time(observing_time, n_eclipses=n_event)
+
+            # Which mid transit times are observable
+            i_mid = is_event_observable(constraints_list, obs, target,
+                                        times=t_mid).squeeze()
+            
+            # Which ingress are observable ...
+            i_t1 = is_event_observable(constraints_list, obs, target,
+                                        times=t1_t4[:,0]).squeeze()
+            # ... when mid transit is not.
+            i_t1 = i_t1 & ~i_mid
+            
+            # Which egress are observable ...
+            i_t4 = is_event_observable(constraints_list, obs, target,
+                                        times=t1_t4[:,1]).squeeze()
+            # ... when mid transit and ingress is not.
+            i_t4 = i_t4 & ~i_mid & ~i_t1
+            
+            # Keep events where ingress, mid_transit or egress is observable
+            index = i_mid | i_t1 | i_t4
+            
+            # Get observability for these events.
+            # Starting point to compute the observability
+            t_obs = np.concatenate([t_mid[i_mid], t1_t4[i_t1,0], t1_t4[i_t4,1]])
+            t_obs = Time(t_obs).sort()
+            # Get observability range for each of these events
+            obs_start = min_start_times(constraints_list, obs, target, t_obs)
+            obs_end = max_end_times(constraints_list, obs, target, t_obs)
+
+            # -------------------
+            # End of steps to predict transits
+            # -------------------
+
+            # Put the infos in a table and stack it to the full table
+            if index.any():
+                name = np.repeat(sys.name,index.sum()).astype(str)
+                moon = obs.moon_illumination(t_mid[index])
+                AM_mid = obs.altaz(t_mid[index], target).secz
+                AM_t1_t4 = obs.altaz(t1_t4[index], target).secz
+        #         AM_base = obs.altaz(t_baseline[index], target).secz
+                obs_start = min_start_times(constraints_list, obs, target, t_mid[index])
+                baseline_before = (t1_t4[index][:,0] - obs_start).to('min')
+                obs_end = max_end_times(constraints_list, obs, target, t_mid[index])
+                baseline_after = (obs_end - t1_t4[index][:,1]).to('min')
+                supp = [np.repeat(data[key][itar],index.sum())
+                        for key in supp_cols]
+                cols = [name,
+                        t_mid[index].iso,
+                        AM_mid,
+                        *t1_t4[index].T.iso,
+                        *AM_t1_t4.T,
+#                         *t_baseline[index].T.iso,
+                        *AM_base.T,
+                        obs_start.iso,
+                        baseline_before,
+                        obs_end.iso,
+                        baseline_after,
+                        moon,
+                        *supp
+                       ]
+                table_sys = Table(cols, names=col_names, masked=True)
+                full_table = vstack([table_sys, full_table])
+            else:
+                warnings.warn('No event found for '+sys.name, AstropyUserWarning)
+
+        if full_table:
+            full_table.sort('mid_tr')
+            full_table.meta = meta
+        else:
+            warnings.warn('No event found at all', AstropyUserWarning)
+
         return full_table
