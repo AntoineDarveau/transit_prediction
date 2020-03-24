@@ -37,7 +37,7 @@ def load_from_masterfile(*args):
 
 class Prediction():
 
-    def __init__(self, time_range, targets, site='cfht', constraints=None, supp_cols=None, n_eclipses=1000):
+    def __init__(self, time_range, targets, site='cfht', constraints=None, supp_cols=None):
         
         
         # Get infos from the MasterFile
@@ -73,7 +73,7 @@ class Prediction():
         self.supp_cols = supp_cols
         self.info_cols = ['pl_name'] + supp_cols
         self.obs = Observer.at_site(site)
-        self.n_eclipses = n_eclipses
+#         self.n_eclipses = n_eclipses
 
         # Resolve targets
         self.targets = [self.resolve_target(i)
@@ -145,9 +145,27 @@ class Prediction():
         
         
 class PredictPhase(Prediction):
+    '''
+        args :
+        -----
+        time_range: list of dates
+        targets: astropy.table like object of target information.
+                 Can also take a list of string of the names of the targets.
+        kwargs : 
+        --------
+        phase_zero: list or quantity object
+            list of the time (bjd) of phases zero.
+            If not specified, take transit mid point
+        site: str, default is 'cfht'
+            observing site
+        constraints: list, default is None
+            observing constraints
+        supp_cols: list, default is None  
+            supplementary columns to include in the output table.
+        '''
     
     def __init__(self, *args, phase_zero=None, **kwargs):
-    
+        
         super().__init__(*args, **kwargs)
         info = self.info
         
@@ -184,10 +202,24 @@ class PredictPhase(Prediction):
         
 
     def predict(self, phase_range, obs_time=3.*u.h, dt_grid=0.5*u.h):
-        
+        '''
+        Parameters:
+        -----------
+        phase_range: list, len=2
+            Phase range
+        obs_time: quantity or float
+            minimum required observing time
+        dt_grid: quantity or float
+            grid steps used to compute observability between phase range.
+        '''
+        if not hasattr(obs_time, 'unit'):
+            obs_time = obs_time * u.h
+        if not hasattr(dt_grid, 'unit'):
+            dt_grid = dt_grid * u.h
+
         t1, t2 = self.meta['Time_limits']
         info = self.info
-        n_eclipses = self.n_eclipses
+        n_eclipses = 500  # TODO: COuld be computed according to period and time range
         constraints_list = self.constraints
         obs = self.obs
         supp_cols = self.supp_cols
@@ -201,7 +233,7 @@ class PredictPhase(Prediction):
         epoch = Time(epoch, format='jd')
         pl_name = info['pl_name']
         
-        observing_time = t1
+        window_start = t1
         
         # Init output table
         col_names = ('pl_name',
@@ -227,7 +259,6 @@ class PredictPhase(Prediction):
             # Steps to predict transits
             # -------------------------
 
-            dt_grid = 0.5*u.h
             d_phase = (dt_grid /period[itar]).decompose().value
             [p1, p2] = phase_range
             p1 += d_phase/10  # Make sure it's not on the boundary
@@ -235,24 +266,30 @@ class PredictPhase(Prediction):
             phase_grid = np.arange(p1, p2, d_phase)
             phase_grid = phase_grid*period[itar] + epoch[itar]
 
-            t_grid = []
-            for phase in phase_grid:
-                sys = EclipsingSystem(primary_eclipse_time=phase,
-                                      orbital_period=period[itar])
-                t_temp = sys.next_primary_eclipse_time(observing_time,
-                                                       n_eclipses=n_eclipses)
-                t_grid.append(t_temp.jd)
-            t_grid = Time(t_grid, format='jd').T
+            while True:
+                # Find all events for each phase point in grid ...
+                t_grid = []
+                for phase in phase_grid:
+                    # Define a system for each phase point
+                    sys = EclipsingSystem(primary_eclipse_time=phase,
+                                          orbital_period=period[itar])
+                    # Compute all events and save
+                    t_temp = sys.next_primary_eclipse_time(window_start,
+                                                           n_eclipses=n_eclipses)
+                    t_grid.append(t_temp.jd)
+                # Convert to Time object
+                t_grid = Time(t_grid, format='jd').T
+                
+                # Do so until t2 is passed
+                if t_grid[-1,-1] > t2: break
+                # or add eclipses to pass t2 and recompute t_grid
+                else: n_eclipses += 500
 
-
-            if t_grid[-1,-1] < t2:
-                warn('end time ('+ t2.value +
-                     ') is passed the last computed event time (' +
-                      t_mid[-1].value+')\n' +
-                     '\t You can change the n_eclipse kwarg ' +
-                     'value or choose a different window (start or end time)',
-                     AstropyUserWarning
-                    )
+            if (np.diff(t_grid.jd, axis=-1) <= 0).any():
+                message = 'Time limit t1 falls into phase range.'  \
+                        + ' This will be corrected eventually.'  \
+                        + ' For now, please change the time limit t1.'
+                raise ValueError(message)
 
             t_grid = t_grid[(t_grid < t2).any(axis=1)]
 
@@ -269,6 +306,7 @@ class PredictPhase(Prediction):
             final_constraints = [*constraints_list,
                 PhaseConstraint(sys, *phase_range)]
 
+            # TODO: Add something to check the dt in min_start_times (can bug if dt_grid too small)
             obs_start = min_start_times(final_constraints, obs, target, events)
             obs_end = max_end_times(final_constraints, obs, target, events)
             baseline = obs_end - obs_start
