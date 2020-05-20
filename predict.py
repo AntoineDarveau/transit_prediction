@@ -447,6 +447,20 @@ class PredictTransit(Prediction):
                      'moon',
                      *supp_cols
                     )
+        description = {
+            'mid_tr': "Time at mid transit [UTC]",
+            'AM_mid_tr': "Airmass at mid transit",
+            'tr_start': "Time at first contact t1 [UTC]",
+            'tr_end': "Time at last contact t4 [UTC]",
+            'AM_tr_start': "Airmass at first contact t1 [UTC]",
+            'AM_tr_end': "Airmass at last contact t4 [UTC]",
+            'Obs_start': 
+                "Beginning of target observability according to input constraints [UTC]",
+            'Baseline_before': "'tr_start' - 'Obs_start'. Can be negative.",
+            'Obs_end': 
+                "End of target observability according to input constraints [UTC]",
+            'Baseline_after': "'Obs_end' - 'tr_end'. Can be negative."
+        }
         meta = {
                 **self.meta
                }
@@ -554,5 +568,12 @@ class PredictTransit(Prediction):
             full_table.meta = meta
         else:
             warnings.warn('No event found at all', AstropyUserWarning)
+            
+        # Add column descriptions
+        for col in full_table.colnames:
+            try:
+                full_table[col].description = description[col]
+            except KeyError:
+                pass
 
         return full_table
