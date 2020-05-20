@@ -6,10 +6,14 @@ from astroplan import is_event_observable
 
 def min_start_time(constraints_list, obs, target, time, dt=1*u.min):
     
+    # Convert some inputs
+    dt = dt.to('day').value
     time = Time(time)
+    
+    # Get sun set time occuring before this event
     evening = obs.sun_set_time(time, which='previous')
 
-    time_grid = np.arange(evening.jd, time.jd, dt.to('day').value) * u.d
+    time_grid = np.arange(evening.jd, time.jd + dt, dt) * u.d
     time_grid = Time(time_grid, format='jd')
     
     index = is_event_observable(constraints_list,

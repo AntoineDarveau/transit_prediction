@@ -201,7 +201,7 @@ class PredictPhase(Prediction):
         self.info_cols = list(set(info_cols))  # Make sure cols are unique
         
 
-    def predict(self, phase_range, obs_time=3.*u.h, dt_grid=0.5*u.h):
+    def predict(self, phase_range, obs_time=3.*u.h, dt_grid=0.5*u.h, phase_constraint=True):
         '''
         Parameters:
         -----------
@@ -241,8 +241,9 @@ class PredictPhase(Prediction):
                      'Phase_start',
                      'Obs_end',
                      'Phase_end',
-                     'mid_tr',
-                     'AM_mid_tr',
+                     'mid_phase',
+                     'AM_mid_phase',
+                     'observability',
                      'moon',
                      *supp_cols
                     )
@@ -302,9 +303,12 @@ class PredictPhase(Prediction):
 
             # Finally add phase constraint
             sys = PeriodicEvent(epoch=epoch[itar], period=period[itar])
-
-            final_constraints = [*constraints_list,
-                PhaseConstraint(sys, *phase_range)]
+            
+            if phase_constraint:
+                final_constraints = [*constraints_list,
+                    PhaseConstraint(sys, *phase_range)]
+            else:
+                final_constraints = constraints_list
 
             # TODO: Add something to check the dt in min_start_times (can bug if dt_grid too small)
             obs_start = min_start_times(final_constraints, obs, target, events)
@@ -324,6 +328,7 @@ class PredictPhase(Prediction):
                 moon = obs.moon_illumination(t_mid[index])
                 phase_start = sys.phase(obs_start[index])
                 phase_end = sys.phase(obs_end[index])
+                observability = obs_end[index] - obs_start[index]
                 AM_mid = obs.altaz(t_mid[index], target).secz
                 supp = [np.repeat(info[key][itar],index.sum())
                         for key in supp_cols]
@@ -334,16 +339,17 @@ class PredictPhase(Prediction):
                         phase_end,
                         t_mid[index].iso,
                         AM_mid,
+                        observability.to(u.h),
                         moon,
                         *supp
                        ]
                 table_sys = Table(cols, names=col_names, masked=True)
                 full_table = vstack([table_sys, full_table])
             else:
-                warn('No event found for ' + sys.name, AstropyUserWarning)
+                warn('No event found for ' + target.name, AstropyUserWarning)
 
         if full_table:
-            full_table.sort('mid_tr')
+            full_table.sort('mid_phase')
             full_table.meta = meta
         else:
             warn('No event found at all', AstropyUserWarning)
@@ -351,6 +357,26 @@ class PredictPhase(Prediction):
         return full_table
     
 class PredictTransit(Prediction):
+    """
+        args :
+        -----
+        time_range: list of dates
+        targets: astropy.table like object of target information.
+                 Can also take a list of string of the names of the targets.
+        kwargs : 
+        --------
+        t0: list or quantity object
+            list of the time (bjd) of transit mid point. If a list
+            is given, assume days units (bjd).
+        duration: list or quantity object
+            list of transit duration in hours (if units not specified).
+        site: str, default is 'cfht'
+            observing site
+        constraints: list, default is None
+            observing constraints
+        supp_cols: list, default is None  
+            supplementary columns to include in the output table.
+    """
     
     def __init__(self, *args, t0=None, duration=None, **kwargs):
     
@@ -364,20 +390,6 @@ class PredictTransit(Prediction):
         # Add transit duration column
         key, description = 'pl_trandur', 'transit duration'
         self.add_column(duration, key, description, unit=u.h)
-        
-#         if t0 is not None:
-#             try:
-#                 info[key] = Column(t0,
-#                                    unit=t0.unit,
-#                                    description = description)
-#             except AttributeError:
-#                 info[key] = Column(t0,
-#                                    unit=u.d,
-#                                    description = description)
-#         elif info[key].mask.any():
-#             raise ValueError(
-#                 "'pl_tranmid' not available for all systems." +
-#                 " Please specify a value for input 't0'.")
                 
         # Save other attributes
         info_cols = ['pl_name', 'pl_tranmid'] + self.supp_cols
@@ -399,7 +411,7 @@ class PredictTransit(Prediction):
         # Inputs from object's attributes
         t1, t2 = self.meta['Time_limits']
         info = self.info
-        n_eclipses = self.n_eclipses
+        n_eclipses = 500
         constraints_list = self.constraints
         obs = self.obs
         supp_cols = self.supp_cols
@@ -416,7 +428,6 @@ class PredictTransit(Prediction):
         
         observing_time = t1
         
-        
         # Init output table
         col_names = ('pl_name',
                      'mid_tr',
@@ -425,10 +436,10 @@ class PredictTransit(Prediction):
                      'tr_end',
                      'AM_tr_start',
                      'AM_tr_end',
-                     'start',
-                     'end',
-                     'AM_start',
-                     'AM_end',
+#                      'start',
+#                      'end',
+#                      'AM_start',
+#                      'AM_end',
                      'Obs_start',
                      'Baseline_before',
                      'Obs_end',
@@ -495,6 +506,7 @@ class PredictTransit(Prediction):
             # Starting point to compute the observability
             t_obs = np.concatenate([t_mid[i_mid], t1_t4[i_t1,0], t1_t4[i_t4,1]])
             t_obs = Time(t_obs).sort()
+            
             # Get observability range for each of these events
             obs_start = min_start_times(constraints_list, obs, target, t_obs)
             obs_end = max_end_times(constraints_list, obs, target, t_obs)
@@ -510,19 +522,21 @@ class PredictTransit(Prediction):
                 AM_mid = obs.altaz(t_mid[index], target).secz
                 AM_t1_t4 = obs.altaz(t1_t4[index], target).secz
         #         AM_base = obs.altaz(t_baseline[index], target).secz
-                obs_start = min_start_times(constraints_list, obs, target, t_mid[index])
-                baseline_before = (t1_t4[index][:,0] - obs_start).to('min')
-                obs_end = max_end_times(constraints_list, obs, target, t_mid[index])
-                baseline_after = (obs_end - t1_t4[index][:,1]).to('min')
-                supp = [np.repeat(data[key][itar],index.sum())
+#                 obs_start = min_start_times(constraints_list, obs, target, t_mid[index])
+                baseline_before = (t1_t4[index,0] - obs_start).to('min')
+#                 obs_end = max_end_times(constraints_list, obs, target, t_mid[index])
+                baseline_after = (obs_end - t1_t4[index,1]).to('min')
+                supp = [np.repeat(info[key][itar],index.sum())
                         for key in supp_cols]
                 cols = [name,
                         t_mid[index].iso,
                         AM_mid,
-                        *t1_t4[index].T.iso,
-                        *AM_t1_t4.T,
+                        t1_t4[index,0].iso,
+                        t1_t4[index,1].iso,
+                        AM_t1_t4[:,0],
+                        AM_t1_t4[:,1],
 #                         *t_baseline[index].T.iso,
-                        *AM_base.T,
+#                         *AM_base.T,
                         obs_start.iso,
                         baseline_before,
                         obs_end.iso,
